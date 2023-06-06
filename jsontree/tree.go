@@ -83,12 +83,12 @@ func (n *Node) Children() []*Node {
 
 func (n *Node) GetJsonPath() string {
 	if n.parent == nil {
-		return n.jsonName
+		return "/" + n.jsonName
 	}
-	if n.IsArrayNode() {
-		return n.parent.GetJsonPath() + "." + n.jsonName
+	if n.parent.IsArrayNode() {
+		return n.parent.GetJsonPath() + "/0/" + n.jsonName
 	}
-	return n.parent.GetJsonPath() + "." + n.jsonName
+	return n.parent.GetJsonPath() + "/" + n.jsonName
 }
 
 func (n *Node) SetValue(value interface{}) *Node {
