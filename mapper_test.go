@@ -1,126 +1,90 @@
 package jsonmapping_test
 
 import (
-	"fmt"
+	"encoding/json"
 	"testing"
 
 	jsonmapping "jsonmaping"
-	"jsonmaping/jsontree"
 )
 
-func TestJsonMapper_FindNodeByValue(t *testing.T) {
-	type findNodeByValueCase struct {
-		name    string
-		jsonStr string
-		value   string
-	}
-
-	cases := []findNodeByValueCase{
-		{
-			name:    "string",
-			jsonStr: `{"foo":"bar"}`,
-			value:   "bar",
-		},
-		{
-			name:    "int",
-			jsonStr: `{"foo":123}`,
-			value:   fmt.Sprintf("%f", float64(123)),
-		},
-		{
-			name:    "float64",
-			jsonStr: `{"foo":1.23}`,
-			value:   fmt.Sprintf("%f", 1.23),
-		},
-		{
-			name:    "bool",
-			jsonStr: `{"foo":true}`,
-			value:   "true",
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			mapper, err := jsonmapping.NewJsonMapper([]byte(c.jsonStr))
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			node := mapper.FindNodeByValue(c.value)
-
-			if node == nil {
-				t.Errorf("Expected to find node with value %s", c.value)
-			}
-
-		})
-	}
-}
-
-func TestJsonMapper_MapJson(t *testing.T) {
+func TestJsonMapper_MapModelToReference(t *testing.T) {
 	type mapJsonCase struct {
-		name         string
-		responseJson string
-		stateJson    string
-		mappedCnt    int
+		name          string
+		referenceJson string
+		stateJson     string
+		expected      string
 	}
 
 	cases := []mapJsonCase{
 		{
-			name:         "string",
-			responseJson: `{"foo1":"bar"}`,
-			stateJson:    `{"foo2":"bar"}`,
-			mappedCnt:    2,
+			name:          "string",
+			referenceJson: `{"foo1":"bar"}`,
+			stateJson:     `{"foo2":"bar"}`,
+			expected:      `{"/foo2":["/response/foo1"]}`,
 		},
 		{
-			name:         "int",
-			responseJson: `{"foo1":123}`,
-			stateJson:    `{"foo2":123}`,
-			mappedCnt:    2,
+			name:          "int",
+			referenceJson: `{"foo1":123}`,
+			stateJson:     `{"foo2":123}`,
+			expected:      `{"/foo2":["/response/foo1"]}`,
 		},
 		{
-			name:         "float64",
-			responseJson: `{"foo1":1.23}`,
-			stateJson:    `{"foo2":1.23}`,
-			mappedCnt:    2,
+			name:          "float64",
+			referenceJson: `{"foo1":1.23}`,
+			stateJson:     `{"foo2":1.23}`,
+			expected:      `{"/foo2":["/response/foo1"]}`,
 		},
 		{
-			name:         "bool",
-			responseJson: `{"foo1":true}`,
-			stateJson:    `{"foo2":true}`,
-			mappedCnt:    2,
+			name:          "bool",
+			referenceJson: `{"foo1":true}`,
+			stateJson:     `{"foo2":true}`,
+			expected:      `{"/foo2":["/response/foo1"]}`,
 		},
 		{
-			name:         "array",
-			responseJson: `{"foo1":["bar1","bar2"]}`,
-			stateJson:    `{"foo2":["bar1","bar2"]}`,
-			mappedCnt:    4,
+			name:          "array",
+			referenceJson: `{"foo1":["bar1","bar2"]}`,
+			stateJson:     `{"foo2":["bar1","bar2"]}`,
+			expected:      `{"/foo2/0":["/response/foo1/0","/response/foo1/0"]}`,
 		},
 		{
-			name:         "object",
-			responseJson: `{"foo1":{"bar1":"test1","bar2":"test2"}}`,
-			stateJson:    `{"foo2":{"baz1":"test1","baz2":"test2"}}`,
-			mappedCnt:    4,
+			name:          "object",
+			referenceJson: `{"foo1":{"bar1":"test1","bar2":"test2"}}`,
+			stateJson:     `{"foo2":{"baz1":"test1","baz2":"test2"}}`,
+			expected:      `{"/foo2/baz1":["/response/foo1/bar1"],"/foo2/baz2":["/response/foo1/bar2"]}`,
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			mapper, err := jsonmapping.NewJsonMapper([]byte(c.responseJson))
+			var ref interface{}
+			err := json.Unmarshal([]byte(c.referenceJson), &ref)
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			mapTree, err := mapper.MapJson([]byte(c.stateJson))
+			refMap := make(map[string]interface{}, 0)
+			refMap["response"] = ref
+
+			mapper, err := jsonmapping.NewMapper(refMap)
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			mappedCnt := 0
-			jsontree.Traverse(mapTree, func(node *jsontree.Node) {
-				if node.GetMappingRef() != nil {
-					mappedCnt++
-				}
-			}, nil)
-			if mappedCnt != c.mappedCnt {
-				t.Errorf("Expected to find %d mapped nodes, but got %d", c.mappedCnt, mappedCnt)
+			var model interface{}
+			err = json.Unmarshal([]byte(c.stateJson), &model)
+
+			mapping, err := mapper.MapModelToReference(model)
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			mappingStr, err := json.Marshal(mapping)
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			if string(mappingStr) != c.expected {
+				t.Errorf("Expected to get %v, but got %v", c.expected, string(mappingStr))
 			}
 		})
 	}

@@ -1,89 +1,72 @@
 package jsonmapping
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
-
-	"jsonmaping/jsontree"
 )
 
 type JsonMapper struct {
-	valueKeyMap map[string]*jsontree.Node
-	treeRoot    *jsontree.Node
+	valuePathMap map[string]string
 }
 
-func unmarshalToTree(jsonByte []byte) (*jsontree.Node, error) {
-	unmarshalledResponse := make(map[string]interface{}, 0)
-
-	err := json.Unmarshal(jsonByte, &unmarshalledResponse)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling response: %v", err)
-	}
-
-	root := jsontree.NewNode("$")
-	root.Unmarshal(unmarshalledResponse)
-
-	return root, nil
-}
-
-func NewJsonMapper(response []byte) (m JsonMapper, err error) {
+func NewMapper(referenceModels map[string]interface{}) (m JsonMapper, err error) {
 	m = JsonMapper{}
-	m.treeRoot, err = unmarshalToTree(response)
-	if err != nil {
-		return m, fmt.Errorf("error unmarshalling response: %v", err)
+	if len(referenceModels) == 0 {
+		return m, fmt.Errorf("the reference model is empty")
 	}
-	// generate a map for finding the node by value
-	m.valueKeyMap = make(map[string]*jsontree.Node, 0)
-	jsontree.Traverse(m.treeRoot, func(n *jsontree.Node) {
-		if n.IsValueNode() {
-			m.valueKeyMap[n.GetStringValue()] = n
-		}
-	}, nil)
+
+	m.valuePathMap = generateValuePathMap(referenceModels, "")
 
 	return m, nil
 }
 
-// FindNodeByValue could only find string, float64 and bool value.
-func (m *JsonMapper) FindNodeByValue(value interface{}) *jsontree.Node {
-	key := ""
-	switch value.(type) {
+func (m *JsonMapper) MapModelToReference(model interface{}) (mapping map[string][]string, err error) {
+	mapping = make(map[string][]string, 0)
+	//if len(model) == 0 {
+	//	return mapping, fmt.Errorf("the model is empty")
+	//}
+
+	valuePathMap := generateValuePathMap(model, "")
+	for value, path := range valuePathMap {
+		if refPath, ok := m.valuePathMap[value]; ok {
+			mapping[path] = append(mapping[path], refPath)
+		}
+	}
+
+	return mapping, nil
+}
+
+func generateValuePathMap(input interface{}, path string) map[string]string {
+	result := make(map[string]string)
+	switch input.(type) {
+	case map[string]interface{}:
+		for k, v := range input.(map[string]interface{}) {
+			tmpMap := generateValuePathMap(v, path+"/"+k)
+			for k, v := range tmpMap {
+				result[k] = v
+			}
+		}
+	case []interface{}:
+		for _, v := range input.([]interface{}) {
+			tmpMap := generateValuePathMap(v, path+"/0")
+			for k, v := range tmpMap {
+				result[k] = v
+			}
+		}
+	default:
+		result[ToString(input)] = path
+	}
+	return result
+}
+
+func ToString(input interface{}) string {
+	switch input.(type) {
 	case string:
-		key = value.(string)
+		return input.(string)
 	case float64:
-		key = fmt.Sprintf("%f", value.(float64))
+		return fmt.Sprintf("%f", input.(float64))
 	case bool:
-		key = strconv.FormatBool(value.(bool))
+		return strconv.FormatBool(input.(bool))
 	}
-	return m.valueKeyMap[key]
-}
-
-// mapTree maps a json tree to the response json tree.
-func (m *JsonMapper) mapTree(mapTree *jsontree.Node) (*jsontree.Node, error) {
-	// traverse the map tree and find the corresponding node in the response tree
-	jsontree.Traverse(mapTree, func(n *jsontree.Node) {
-		if n.IsValueNode() {
-			if mappedNode := m.FindNodeByValue(n.GetStringValue()); mappedNode != nil {
-				n.SetMappingRef(mappedNode)
-			}
-		}
-	}, func(n *jsontree.Node) {
-		if !n.IsValueNode() {
-			if parent, yes := jsontree.IsMapToSameParent(n.Children()); yes {
-				n.SetMappingRef(parent)
-			}
-		}
-	})
-
-	return mapTree, nil
-}
-
-// MapJson maps a json to the response json tree.
-func (m *JsonMapper) MapJson(input []byte) (*jsontree.Node, error) {
-	mapTree, err := unmarshalToTree(input)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling state json: %v", err)
-	}
-
-	return m.mapTree(mapTree)
+	return ""
 }
